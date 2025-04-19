@@ -1,0 +1,48 @@
+name: Create deployment
+description: Sets up a deployment of the given ref and sha to the given environment, marks it as in-progress and returns the deployment ID.
+
+inputs:
+    ref:
+        description: The ref to use for the deployment
+        required: true
+    sha:
+        description: The sha to use for the deployment
+        required: true
+    environment:
+        description: The environment to use for the deployment
+        required: true
+outputs:
+    deployment_id:
+        description: The deployment ID
+        value: ${{ steps.create_deployment.outputs.deployment_id }}
+
+runs:
+    using: "composite"
+    steps:
+        - name: Create deployment
+          id: create_deployment
+          env:
+              GH_TOKEN: ${{ github.token }}
+          shell: bash
+          run: |
+              jq -n \
+                --arg ref "${{ inputs.ref }}" \
+                --arg sha "${{ inputs.sha }}" \
+                --arg environment "${{ inputs.environment }}" \
+                '{ref: $ref, sha: $sha, environment: $environment, auto_merge: false, required_contexts: []}' \
+                > payload.json
+                
+              DEPLOY_ID=$(gh api \
+                -X POST \
+                -H "Accept: application/vnd.github+json" \
+                    repos/${{ github.repository }}/deployments \
+                --input payload.json \
+                --jq '.id')
+
+              echo "deployment_id=$DEPLOY_ID" >> "$GITHUB_OUTPUT"
+
+              gh api \
+                  -X POST \
+                  -H "Accept: application/vnd.github+json" \
+                  repos/${{ github.repository }}/deployments/${DEPLOY_ID}/statuses \
+                  -f state="in_progress"
