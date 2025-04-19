@@ -1,0 +1,33 @@
+name: Setup SSH
+description: Sets up required files and data for making SSH connections
+
+inputs:
+    ssh_known_hosts:
+        description: The known_hosts entry for SSH (only the hash; the rest is generated based on the host and port inputs)
+        required: true
+    ssh_private_key:
+        description: The private key for SSH
+        required: true
+    ssh_host:
+        description: The host for SSH
+        required: true
+    ssh_port:
+        description: The port for SSH
+        default: 22
+        required: false
+    ssh_id_file:
+        description: The id file name to use for SSH
+        default: id
+        required: false
+
+runs:
+    using: "composite"
+    steps:
+        - name: Set up SSH access
+          shell: bash
+          run: |
+              mkdir -p -m 700 ~/.ssh
+
+              echo "[${{ inputs.ssh_host }}]:${{ inputs.ssh_port }} ${{ inputs.ssh_known_hosts }}" > ~/.ssh/known_hosts
+              echo "${{ inputs.ssh_private_key }}" > ~/.ssh/${{ inputs.ssh_id_file }}
+              chmod 600 ~/.ssh/${{ inputs.ssh_id_file }}
