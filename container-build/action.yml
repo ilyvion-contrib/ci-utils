@@ -17,12 +17,6 @@ inputs:
 runs:
     using: "composite"
     steps:
-        - name: Debug paths
-          shell: bash
-          run: |
-              echo "Composite step is running in: $PWD"
-              echo "GITHUB_WORKSPACE: $GITHUB_WORKSPACE"
-
         - name: Set up Docker Buildx
           uses: docker/setup-buildx-action@v3
 
@@ -37,4 +31,4 @@ runs:
 
         - name: Save Docker image
           shell: bash
-          run: docker save -o ${GITHUB_WORKSPACE}/${{ inputs.image }}.tar ${{ inputs.image }}:${{ inputs.tag }}
+          run: docker save -o ${{ inputs.image }}.tar ${{ inputs.image }}:${{ inputs.tag }}
