@@ -1,0 +1,39 @@
+name: Deploy container image
+description: Deploys a Docker image to a remote server using SSH and updates Docker.
+
+inputs:
+    ssh_user:
+        description: The user for SSH
+        required: true
+    ssh_host:
+        description: The host for SSH
+        required: true
+    ssh_port:
+        description: The port for SSH
+        default: 22
+        required: false
+    image:
+        description: The image name
+        required: true
+    tag:
+        description: The tag name
+        default: staging
+        required: false
+
+runs:
+    using: "composite"
+    steps:
+        - name: Copy Docker image to remote server
+          shell: bash
+          run: |
+              rsync -azvh -e 'ssh -i ~/.ssh/id -p ${{ inputs.ssh_port }}' ${{ inputs.image }}.tar \
+              ${{ inputs.ssh_user }}@${{ inputs.ssh_host }}:~/docker/${{ inputs.image }}/
+
+        - name: Run remote deploy commands
+          shell: bash
+          run: |
+              ssh -p ${{ inputs.ssh_port }} -i ~/.ssh/id ${{ inputs.ssh_user }}@${{ inputs.ssh_host }} '
+                cd ~/docker/${{ inputs.image }}/ &&
+                sudo update-docker-image.sh ${{ inputs.image }}.tar ${{ inputs.image }}:${{ inputs.tag }} &&
+                sudo docker compose up -d ${{ inputs.image }}-${{ inputs.tag }}
+              '
