@@ -1,0 +1,35 @@
+name: Stop self-hosted runner
+description: Stops a self-hosted runner on an EC2 instance.
+
+inputs:
+    aws_role:
+        description: The AWS role to assume
+        required: true
+    aws_region:
+        description: The AWS region
+        required: true
+    github_personal_access_token:
+        description: GitHub Personal Access Token with the repo scope assigned
+        required: true
+    runner_label:
+        description: The runner label
+        required: true
+    ec2_instance_id:
+        description: The instance ID of the EC2 instance
+        required: true
+
+runs:
+    using: "composite"
+    steps:
+        - name: Configure AWS credentials
+          uses: aws-actions/configure-aws-credentials@v4
+          with:
+              role-to-assume: ${{ inputs.aws_role }}
+              aws-region: ${{ inputs.aws_region }}
+        - name: Stop EC2 runner
+          uses: machulav/ec2-github-runner@v2.3.9
+          with:
+              mode: stop
+              github-token: ${{ inputs.github_personal_access_token }}
+              label: ${{ inputs.runner_label }}
+              ec2-instance-id: ${{ inputs.ec2_instance_id }}

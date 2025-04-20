@@ -1,0 +1,73 @@
+name: Start self-hosted runner
+description: Starts a self-hosted runner on an EC2 instance and returns the instance ID and runner label.
+
+inputs:
+    aws_role:
+        description: The AWS role to assume
+        required: true
+    aws_region:
+        description: The AWS region
+        required: true
+    github_personal_access_token:
+        description: GitHub Personal Access Token with the repo scope assigned
+        required: true
+    ec2_image_id:
+        description: The EC2 image ID
+        default: ami-0aa56f6a386a2b5a5 # Amazon Linux 2023 AMI 2023.7.20250414.0 arm64 HVM kernel-6.1
+        required: false
+    ec2_instance_type:
+        description: The EC2 instance type
+        default: t4g.small # t4g.small (2 vCPUs, 2 GiB memory, up to 5 Gbps network performance)
+        required: false
+    subnet_id:
+        description: The subnet ID for the EC2 instance
+        required: true
+    security_group_id:
+        description: The security group ID for the EC2 instance
+        required: true
+    iam_role_name:
+        description: The IAM role name for the EC2 instance (optional, requires additional permissions)
+        required: false
+    aws_resource_tags:
+        description: The AWS resource tags for the EC2 instance (optional, requires additional permissions)
+        default: "[]"
+        required: false
+    pre-runner-script:
+        description: The script to run before starting the runner (optional)
+        required: false
+        default: |
+            sudo yum update -y && \ 
+                sudo yum install docker git libicu -y && \
+                sudo systemctl enable docker && \
+                sudo systemctl start docker
+outputs:
+    runner_label:
+        description: The runner label (to be used with `runs-on`)
+        value: ${{ steps.start-runner.outputs.label }}
+    ec2_instance_id:
+        description: The instance ID of the EC2 instance
+        value: ${{ steps.start-runner.outputs.ec2-instance-id }}
+
+runs:
+    using: "composite"
+    steps:
+        - name: Configure AWS credentials
+          uses: aws-actions/configure-aws-credentials@v4
+          with:
+              role-to-assume: ${{ inputs.aws_role }}
+              aws-region: ${{ inputs.aws_region }}
+
+        - name: Start EC2 runner
+          id: start-runner
+          uses: machulav/ec2-github-runner@v2.3.9
+          with:
+              mode: start
+              market-type: spot
+              github-token: ${{ inputs.github_personal_access_token }}
+              ec2-image-id: ${{ inputs.ec2_image_id }}
+              ec2-instance-type: ${{ inputs.ec2_instance_type }}
+              subnet-id: ${{ inputs.subnet_id }}
+              security-group-id: ${{ inputs.security_group_id }}
+              iam-role-name: ${{ inputs.iam_role_name }} # optional, requires additional permissions
+              aws-resource-tags: ${{ inputs.aws_resource_tags }} # optional, requires additional permissions
+              pre-runner-script: ${{ inputs.pre-runner-script }}
