@@ -36,10 +36,21 @@ inputs:
         description: The script to run before starting the runner (optional)
         required: false
         default: |
-            sudo yum update -y && \ 
+            sudo yum update -y && \
                 sudo yum install docker git libicu -y && \
                 sudo systemctl enable docker && \
-                sudo systemctl start docker
+                sudo systemctl start docker && \
+                sudo systemctl enable amazon-ssm-agent && \
+                sudo systemctl start amazon-ssm-agent
+            sudo fallocate -l 1G /swapfile
+            sudo chmod 600 /swapfile
+            sudo mkswap /swapfile
+            sudo swapon /swapfile
+    custom-disk-size:
+        description: The custom disk size for the EC2 instance (optional)
+        required: false
+        default: 0 # 0 means default size (8 GiB for Amazon Linux 2023 AMI)
+
 outputs:
     runner_label:
         description: The runner label (to be used with `runs-on`)
@@ -71,3 +82,109 @@ runs:
               iam-role-name: ${{ inputs.iam_role_name }} # optional, requires additional permissions
               aws-resource-tags: ${{ inputs.aws_resource_tags }} # optional, requires additional permissions
               pre-runner-script: ${{ inputs.pre-runner-script }}
+
+        - name: Increase root EBS disk size
+          if: ${{ inputs.custom-disk-size != 0 }}
+          shell: bash
+          run: |
+              VOLUME_ID=$(aws ec2 describe-instances \
+                --instance-ids ${{ steps.start-runner.outputs.ec2-instance-id }} \
+                --query "Reservations[0].Instances[0].BlockDeviceMappings[?DeviceName=='/dev/xvda'].Ebs.VolumeId" \
+                --output text)
+
+              echo "Resizing volume $VOLUME_ID to ${{ inputs.custom-disk-size }} GiB..."
+              aws ec2 modify-volume --volume-id $VOLUME_ID --size ${{ inputs.custom-disk-size }}
+
+              # Wait until the volume's modification state is 'completed'
+              echo "Waiting for volume $VOLUME_ID to finish modification..."
+              for i in {1..30}; do
+                STATE=$(aws ec2 describe-volumes-modifications \
+                  --volume-ids "$VOLUME_ID" \
+                  --query "VolumesModifications[0].ModificationState" \
+                  --output text)
+
+                echo "Current volume modification state: $STATE"
+
+                if [ "$STATE" = "optimizing" ] || [ "$STATE" = "completed" ]; then
+                  echo "Volume modification complete!"
+                  break
+                elif [ "$STATE" = "failed" ]; then
+                  echo "Volume modification failed!" >&2
+                  exit 1
+                fi
+
+                sleep 5
+              done
+
+              if [ "$STATE" != "optimizing" ] && [ "$STATE" != "completed" ]; then
+                echo "Volum modification never finished. Aborting." >&2
+                exit 1
+              fi
+
+              for i in {1..30}; do
+                STATUS=$(aws ssm describe-instance-information \
+                  --query "InstanceInformationList[?InstanceId=='${{ steps.start-runner.outputs.ec2-instance-id }}'].PingStatus" \
+                  --output text)
+
+                echo "SSM status: $STATUS"
+                if [ "$STATUS" = "Online" ]; then
+                  echo "Instance is ready for SSM commands."
+                  break
+                fi
+
+                sleep 5
+              done
+
+              if [ "$STATUS" != "Online" ]; then
+                echo "Instance never came online for SSM. Aborting." >&2
+                exit 1
+              fi
+
+              echo "Grow the root partition and resize the filesystem..."
+              COMMAND_ID=$(aws ssm send-command \
+                --instance-ids ${{ steps.start-runner.outputs.ec2-instance-id }} \
+                --document-name "AWS-RunShellScript" \
+                --comment "Resize root partition after volume expansion" \
+                --parameters 'commands=[
+                  "sudo yum install -y cloud-utils-growpart",
+                  "sudo growpart /dev/xvda 1",
+                  "sudo xfs_growfs -d /"
+                ]' \
+                --query "Command.CommandId" \
+                --output text)
+
+              # Wait for the command to finish and output ongoing stdout and stderr
+              LAST_STDOUT=""
+              while true; do
+                OUTPUT=$(aws ssm get-command-invocation \
+                  --command-id "$COMMAND_ID" \
+                  --instance-id "${{ steps.start-runner.outputs.ec2-instance-id }}" \
+                  --output json)
+
+                STATUS=$(echo "$OUTPUT" | jq -r .Status)
+                STDOUT=$(echo "$OUTPUT" | jq -r .StandardOutputContent)
+                STDERR=$(echo "$OUTPUT" | jq -r .StandardErrorContent)
+
+                if [[ "$STDOUT" != "$LAST_STDOUT" ]]; then
+                  NEW_OUTPUT="${STDOUT#"$LAST_STDOUT"}"
+                  echo "$NEW_OUTPUT"
+                  LAST_STDOUT="$STDOUT"
+                fi
+
+                if [[ "$STATUS" == "Success" || "$STATUS" == "Failed" || "$STATUS" == "Cancelled" || "$STATUS" == "TimedOut" ]]; then
+                  echo
+                  echo "Command finished with status: $STATUS"
+                  if [[ -n "$STDERR" ]]; then
+                    echo "--- STDERR ---"
+                    echo "$STDERR"
+                  fi
+                  break
+                fi
+
+                sleep 3
+              done
+
+              if [ "$STATUS" != "Success" ]; then
+                echo "Partition resize never reached success. Aborting." >&2
+                exit 1
+              fi
