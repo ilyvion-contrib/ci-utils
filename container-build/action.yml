@@ -27,7 +27,7 @@ runs:
           with:
               context: ${{ inputs.context }}
               cache-from: type=gha
-              cache-to: type=gha,mode=max
+              cache-to: type=gha,mode=max,compression=zstd,compression-level=3
               tags: ${{ inputs.image }}:${{ inputs.tag }}
               load: true
 
