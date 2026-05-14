@@ -62,6 +62,9 @@ outputs:
     ec2_instance_id:
         description: The instance ID of the EC2 instance
         value: ${{ steps.start-runner.outputs.ec2-instance-id }}
+    used_spot_instance:
+        description: Whether a spot instance was used (true) or on-demand fallback (false)
+        value: ${{ steps.start-runner.outputs.used-spot }}
     builder_name:
         description: Name of the pre-configured buildx builder backed by the cache volume, or empty string if no cache volume was provided.
         value: ${{ inputs.cache_volume_id != '' && 'ebs-builder' || '' }}
@@ -75,8 +78,9 @@ runs:
               role-to-assume: ${{ inputs.aws_role }}
               aws-region: ${{ inputs.aws_region }}
 
-        - name: Start EC2 runner
-          id: start-runner
+        - name: Start EC2 runner (spot)
+          id: start-runner-spot
+          continue-on-error: true
           uses: machulav/ec2-github-runner@v2.3.9
           with:
               mode: start
@@ -89,6 +93,35 @@ runs:
               iam-role-name: ${{ inputs.iam_role_name }} # optional, requires additional permissions
               aws-resource-tags: ${{ inputs.aws_resource_tags }} # optional, requires additional permissions
               pre-runner-script: ${{ inputs.pre-runner-script }}
+
+        - name: Start EC2 runner (on-demand fallback)
+          id: start-runner-ondemand
+          if: steps.start-runner-spot.outcome == 'failure'
+          uses: machulav/ec2-github-runner@v2.3.9
+          with:
+              mode: start
+              github-token: ${{ inputs.github_personal_access_token }}
+              ec2-image-id: ${{ inputs.ec2_image_id }}
+              ec2-instance-type: ${{ inputs.ec2_instance_type }}
+              subnet-id: ${{ inputs.subnet_id }}
+              security-group-id: ${{ inputs.security_group_id }}
+              iam-role-name: ${{ inputs.iam_role_name }} # optional, requires additional permissions
+              aws-resource-tags: ${{ inputs.aws_resource_tags }} # optional, requires additional permissions
+              pre-runner-script: ${{ inputs.pre-runner-script }}
+
+        - name: Resolve runner outputs
+          id: start-runner
+          shell: bash
+          run: |
+              if [ "${{ steps.start-runner-spot.outcome }}" = "success" ]; then
+                echo "label=${{ steps.start-runner-spot.outputs.label }}" >> "$GITHUB_OUTPUT"
+                echo "ec2-instance-id=${{ steps.start-runner-spot.outputs.ec2-instance-id }}" >> "$GITHUB_OUTPUT"
+                echo "used-spot=true" >> "$GITHUB_OUTPUT"
+              else
+                echo "label=${{ steps.start-runner-ondemand.outputs.label }}" >> "$GITHUB_OUTPUT"
+                echo "ec2-instance-id=${{ steps.start-runner-ondemand.outputs.ec2-instance-id }}" >> "$GITHUB_OUTPUT"
+                echo "used-spot=false" >> "$GITHUB_OUTPUT"
+              fi
 
         - name: Increase root EBS disk size
           if: ${{ inputs.custom-disk-size != 0 }}
