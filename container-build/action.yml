@@ -17,23 +17,87 @@ inputs:
         description: Name of a pre-configured buildx builder to use (optional). When set, the GHA layer cache is skipped in favour of the builder's own persistent cache.
         required: false
         default: ""
+    s3_cache_bucket:
+        description: S3 bucket name to use for Docker BuildKit layer cache (optional). Mutually exclusive with `builder`.
+        required: false
+        default: ""
+    s3_cache_region:
+        description: AWS region of the S3 cache bucket. Required when `s3_cache_bucket` is set.
+        required: false
+        default: ""
+    s3_cache_prefix:
+        description: Optional path prefix to namespace cache entries within the bucket. Sets blobs_prefix=<prefix>/blobs/ and manifests_prefix=<prefix>/manifests/ on the BuildKit S3 cache. Useful when multiple images share one bucket.
+        required: false
+        default: ""
+    build_cache_key:
+        description: S3 key prefix for persisting BuildKit cache mounts across ephemeral runners. Requires s3_cache_bucket, s3_cache_region, and s3_cache_ids.
+        required: false
+        default: ""
+    s3_cache_ids:
+        description: Comma-separated list of BuildKit cache mount IDs to persist. Each ID is stored at /cache/<id> during the seed/export builds.
+        required: false
+        default: ""
 
 runs:
     using: "composite"
     steps:
+        - name: Validate cache mode inputs
+          if: ${{ inputs.builder != '' && inputs.s3_cache_bucket != '' }}
+          shell: bash
+          run: |
+              echo "::error::Inputs 'builder' and 's3_cache_bucket' are mutually exclusive. Set only one cache mode."
+              exit 1
+
         - name: Set up Docker Buildx (no persistent builder)
           if: ${{ inputs.builder == '' }}
           uses: docker/setup-buildx-action@v3
           with:
               version: latest
 
+        - name: Restore build cache mounts from S3
+          if: ${{ inputs.build_cache_key != '' && inputs.s3_cache_ids != '' && inputs.s3_cache_bucket != '' }}
+          shell: bash
+          run: |
+              MOUNTS=""
+              IFS=',' read -ra IDS <<< "${{ inputs.s3_cache_ids }}"
+              for id in "${IDS[@]}"; do
+                id="${id// /}"
+                [ -z "$id" ] && continue
+                MOUNTS="$MOUNTS --mount=type=cache,id=${id},target=/cache/${id}"
+              done
+
+              PREFIX="${{ inputs.s3_cache_prefix }}"
+              S3_KEY="${PREFIX:+${PREFIX}/}${{ inputs.build_cache_key }}.tar.zst"
+
+              CACHE_DIR=$(mktemp -d)
+              if aws s3 ls "s3://${{ inputs.s3_cache_bucket }}/${S3_KEY}" > /dev/null 2>&1; then
+                echo "Downloading build cache from S3..."
+                aws s3 cp "s3://${{ inputs.s3_cache_bucket }}/${S3_KEY}" - | zstd -d | tar -x -C "$CACHE_DIR"
+                echo "Seeding BuildKit cache mounts..."
+                printf 'FROM alpine\nCOPY . /seed\nRUN %s cp -a /seed/. /cache/\n' "$MOUNTS" \
+                  | docker buildx build --no-cache --file - "$CACHE_DIR"
+              else
+                echo "No build cache found in S3, starting cold."
+              fi
+              rm -rf "$CACHE_DIR"
+
         - name: Build image (with GHA cache)
-          if: ${{ inputs.builder == '' }}
+          if: ${{ inputs.builder == '' && inputs.s3_cache_bucket == '' }}
           uses: docker/build-push-action@v6
           with:
               context: ${{ inputs.context }}
               cache-from: type=gha
               cache-to: type=gha,mode=max,compression=zstd,compression-level=3
+              tags: ${{ inputs.image }}:${{ inputs.tag }}
+              load: true
+
+        - name: Build image (with S3 cache)
+          if: ${{ inputs.builder == '' && inputs.s3_cache_bucket != '' }}
+          uses: docker/build-push-action@v6
+          with:
+              context: ${{ inputs.context }}
+              cache-from: type=s3,region=${{ inputs.s3_cache_region }},bucket=${{ inputs.s3_cache_bucket }}${{ inputs.s3_cache_prefix != '' && format(',blobs_prefix={0}/blobs/,manifests_prefix={0}/manifests/', inputs.s3_cache_prefix) || '' }}
+              cache-to: type=s3,mode=max,region=${{ inputs.s3_cache_region }},bucket=${{ inputs.s3_cache_bucket }}${{ inputs.s3_cache_prefix != '' && format(',blobs_prefix={0}/blobs/,manifests_prefix={0}/manifests/', inputs.s3_cache_prefix) || '' }}
               tags: ${{ inputs.image }}:${{ inputs.tag }}
               load: true
 
@@ -45,6 +109,37 @@ runs:
               builder: ${{ inputs.builder }}
               tags: ${{ inputs.image }}:${{ inputs.tag }}
               load: true
+
+        - name: Save build cache mounts to S3
+          if: ${{ inputs.build_cache_key != '' && inputs.s3_cache_ids != '' && inputs.s3_cache_bucket != '' }}
+          shell: bash
+          run: |
+              MOUNTS=""
+              IFS=',' read -ra IDS <<< "${{ inputs.s3_cache_ids }}"
+              for id in "${IDS[@]}"; do
+                id="${id// /}"
+                [ -z "$id" ] && continue
+                MOUNTS="$MOUNTS --mount=type=cache,id=${id},target=/cache/${id}"
+              done
+
+              PREFIX="${{ inputs.s3_cache_prefix }}"
+              S3_KEY="${PREFIX:+${PREFIX}/}${{ inputs.build_cache_key }}.tar.zst"
+
+              EXPORT_DIR=$(mktemp -d)
+              echo "Exporting BuildKit cache mounts..."
+              printf 'FROM alpine AS export\nRUN %s mkdir -p /out && cp -a /cache/. /out/\nFROM scratch\nCOPY --from=export /out /\n' "$MOUNTS" \
+                | docker buildx build --file - --output "type=local,dest=$EXPORT_DIR" .
+
+              if [ -n "$(ls -A "$EXPORT_DIR")" ]; then
+                echo "Uploading build cache to S3..."
+                tar -c -C "$EXPORT_DIR" . | \
+                  zstd -3 | \
+                  aws s3 cp - \
+                    "s3://${{ inputs.s3_cache_bucket }}/${S3_KEY}"
+              else
+                echo "Cache export was empty, skipping upload."
+              fi
+              rm -rf "$EXPORT_DIR"
 
         - name: Save Docker image
           shell: bash
