@@ -113,7 +113,7 @@ runs:
               fi
 
         - name: Stop EC2 runner
-          uses: machulav/ec2-github-runner@v2.3.9
+          uses: machulav/ec2-github-runner@v2.6.1
           with:
               mode: stop
               github-token: ${{ inputs.github_personal_access_token }}

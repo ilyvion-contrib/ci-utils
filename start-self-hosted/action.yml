@@ -48,12 +48,15 @@ inputs:
             sudo swapon /swapfile
     custom-disk-size:
         description: The custom disk size for the EC2 instance (optional)
-        required: false
-        default: 0 # 0 means default size (8 GiB for Amazon Linux 2023 AMI)
+        default: 8
+        required: false # missing means default size (8 GiB for Amazon Linux 2023 AMI)
+    custom-disk-name:
+        description: The custom disk name for the EC2 instance (optional)
+        default: "/dev/xvda"
+        required: false # missing means default name (/dev/xvda for Amazon Linux 2023 AMI)
     cache_volume_id:
         description: EBS volume ID to attach as a persistent build cache (optional). The volume is mounted over /var/lib/docker so Docker layer cache and BuildKit cache mounts survive across ephemeral runners.
         required: false
-        default: ""
 
 outputs:
     runner_label:
@@ -81,7 +84,7 @@ runs:
         - name: Start EC2 runner (spot)
           id: start-runner-spot
           continue-on-error: true
-          uses: machulav/ec2-github-runner@v2.3.9
+          uses: machulav/ec2-github-runner@v2.6.1
           with:
               mode: start
               market-type: spot
@@ -93,11 +96,13 @@ runs:
               iam-role-name: ${{ inputs.iam_role_name }} # optional, requires additional permissions
               aws-resource-tags: ${{ inputs.aws_resource_tags }} # optional, requires additional permissions
               pre-runner-script: ${{ inputs.pre-runner-script }}
+              ec2-volume-size: ${{ inputs.custom-disk-size }}
+              ec2-device-name: ${{ inputs.custom-disk-name }}
 
         - name: Start EC2 runner (on-demand fallback)
           id: start-runner-ondemand
           if: steps.start-runner-spot.outcome == 'failure'
-          uses: machulav/ec2-github-runner@v2.3.9
+          uses: machulav/ec2-github-runner@v2.6.1
           with:
               mode: start
               github-token: ${{ inputs.github_personal_access_token }}
@@ -108,6 +113,8 @@ runs:
               iam-role-name: ${{ inputs.iam_role_name }} # optional, requires additional permissions
               aws-resource-tags: ${{ inputs.aws_resource_tags }} # optional, requires additional permissions
               pre-runner-script: ${{ inputs.pre-runner-script }}
+              ec2-volume-size: ${{ inputs.custom-disk-size }}
+              ec2-device-name: ${{ inputs.custom-disk-name }}
 
         - name: Resolve runner outputs
           id: start-runner
@@ -132,35 +139,6 @@ runs:
                 --query "Reservations[0].Instances[0].BlockDeviceMappings[?DeviceName=='/dev/xvda'].Ebs.VolumeId" \
                 --output text)
 
-              echo "Resizing volume $VOLUME_ID to ${{ inputs.custom-disk-size }} GiB..."
-              aws ec2 modify-volume --volume-id $VOLUME_ID --size ${{ inputs.custom-disk-size }}
-
-              # Wait until the volume's modification state is 'completed'
-              echo "Waiting for volume $VOLUME_ID to finish modification..."
-              for i in {1..30}; do
-                STATE=$(aws ec2 describe-volumes-modifications \
-                  --volume-ids "$VOLUME_ID" \
-                  --query "VolumesModifications[0].ModificationState" \
-                  --output text)
-
-                echo "Current volume modification state: $STATE"
-
-                if [ "$STATE" = "optimizing" ] || [ "$STATE" = "completed" ]; then
-                  echo "Volume modification complete!"
-                  break
-                elif [ "$STATE" = "failed" ]; then
-                  echo "Volume modification failed!" >&2
-                  exit 1
-                fi
-
-                sleep 5
-              done
-
-              if [ "$STATE" != "optimizing" ] && [ "$STATE" != "completed" ]; then
-                echo "Volum modification never finished. Aborting." >&2
-                exit 1
-              fi
-
               for i in {1..30}; do
                 STATUS=$(aws ssm describe-instance-information \
                   --query "InstanceInformationList[?InstanceId=='${{ steps.start-runner.outputs.ec2-instance-id }}'].PingStatus" \
@@ -172,7 +150,7 @@ runs:
                   break
                 fi
 
-                sleep 5
+                sleep 2
               done
 
               if [ "$STATUS" != "Online" ]; then
