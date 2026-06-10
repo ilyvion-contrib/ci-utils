@@ -72,9 +72,10 @@ runs:
               CACHE_DIR=$(mktemp -d)
               if aws s3 ls "s3://${{ inputs.s3_cache_bucket }}/${S3_KEY}" > /dev/null 2>&1; then
                 echo "Downloading build cache from S3..."
-                aws s3 cp "s3://${{ inputs.s3_cache_bucket }}/${S3_KEY}" - | zstd -d | tar -x -C "$CACHE_DIR"
+                aws s3 cp "s3://${{ inputs.s3_cache_bucket }}/${S3_KEY}" - \
+                  | zstd -d > "$CACHE_DIR/cache.tar"
                 echo "Seeding BuildKit cache mounts..."
-                printf 'FROM alpine\nCOPY . /seed\nRUN %s cp -a /seed/. /cache/\n' "$MOUNTS" \
+                printf 'FROM alpine\nCOPY cache.tar /\nRUN %s tar -x -C /cache -f /cache.tar\n' "$MOUNTS" \
                   | docker buildx build --no-cache --file - "$CACHE_DIR"
               else
                 echo "No build cache found in S3, starting cold."
@@ -127,15 +128,13 @@ runs:
 
               EXPORT_DIR=$(mktemp -d)
               echo "Exporting BuildKit cache mounts..."
-              printf 'FROM alpine AS export\nRUN %s mkdir -p /out && cp -a /cache/. /out/\nFROM scratch\nCOPY --from=export /out /\n' "$MOUNTS" \
+              printf 'FROM alpine AS export\nRUN %s tar -c -C /cache . > /cache.tar\nFROM scratch\nCOPY --from=export /cache.tar /\n' "$MOUNTS" \
                 | docker buildx build --file - --output "type=local,dest=$EXPORT_DIR" .
 
-              if [ -n "$(ls -A "$EXPORT_DIR")" ]; then
+              if [ -f "$EXPORT_DIR/cache.tar" ]; then
                 echo "Uploading build cache to S3..."
-                tar -c -C "$EXPORT_DIR" . | \
-                  zstd -3 | \
-                  aws s3 cp - \
-                    "s3://${{ inputs.s3_cache_bucket }}/${S3_KEY}"
+                zstd -3 "$EXPORT_DIR/cache.tar" --stdout \
+                  | aws s3 cp - "s3://${{ inputs.s3_cache_bucket }}/${S3_KEY}"
               else
                 echo "Cache export was empty, skipping upload."
               fi
