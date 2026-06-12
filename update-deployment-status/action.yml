@@ -1,0 +1,24 @@
+name: Update deployment status
+description: Posts a status update (e.g. success or failure) to an existing GitHub deployment.
+
+inputs:
+    deployment_id:
+        description: The deployment ID to update (from the create-deployment action's deployment_id output)
+        required: true
+    state:
+        description: The deployment state to set (e.g. success, failure, in_progress, queued, error, inactive)
+        required: true
+
+runs:
+    using: "composite"
+    steps:
+        - name: Update deployment status
+          env:
+              GH_TOKEN: ${{ github.token }}
+          shell: bash
+          run: |
+              gh api \
+                  -X POST \
+                  -H "Accept: application/vnd.github+json" \
+                  repos/${{ github.repository }}/deployments/${{ inputs.deployment_id }}/statuses \
+                  -f state="${{ inputs.state }}"
