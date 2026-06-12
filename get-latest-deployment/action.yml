@@ -1,0 +1,32 @@
+name: Get latest deployment
+description: Fetches the most recent deployment for the given environment and returns its ref and sha.
+
+inputs:
+    environment:
+        description: The environment to look up (e.g. staging, production)
+        required: true
+
+outputs:
+    ref:
+        description: The ref of the most recent deployment
+        value: ${{ steps.get_deployment.outputs.ref }}
+    sha:
+        description: The sha of the most recent deployment
+        value: ${{ steps.get_deployment.outputs.sha }}
+
+runs:
+    using: "composite"
+    steps:
+        - name: Get latest deployment
+          id: get_deployment
+          env:
+              GH_TOKEN: ${{ github.token }}
+          shell: bash
+          run: |
+              DEPLOYMENT_JSON=$(gh api \
+                -H "Accept: application/vnd.github+json" \
+                    repos/${{ github.repository }}/deployments \
+                --jq '.[] | select(.environment == "${{ inputs.environment }}")' | head -n1)
+
+              echo "ref=$(echo "$DEPLOYMENT_JSON" | jq -r '.ref')" >> "$GITHUB_OUTPUT"
+              echo "sha=$(echo "$DEPLOYMENT_JSON" | jq -r '.sha')" >> "$GITHUB_OUTPUT"
