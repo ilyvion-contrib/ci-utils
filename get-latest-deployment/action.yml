@@ -26,7 +26,7 @@ runs:
               DEPLOYMENT_JSON=$(gh api \
                 -H "Accept: application/vnd.github+json" \
                     repos/${{ github.repository }}/deployments \
-                --jq '.[] | select(.environment == "${{ inputs.environment }}")' | head -n1)
+                --jq 'first(.[] | select(.environment == "${{ inputs.environment }}"))')
 
               echo "ref=$(echo "$DEPLOYMENT_JSON" | jq -r '.ref')" >> "$GITHUB_OUTPUT"
               echo "sha=$(echo "$DEPLOYMENT_JSON" | jq -r '.sha')" >> "$GITHUB_OUTPUT"
