@@ -40,6 +40,9 @@ inputs:
             sudo chmod 600 /swapfile
             sudo mkswap /swapfile
             sudo swapon /swapfile
+            sudo mkdir -p /disktmp
+            sudo chown 777 /disktmp
+            sudo mount --bind /disktmp /tmp
     custom-disk-size:
         description: The custom disk size for the EC2 instance (optional)
         default: 8
