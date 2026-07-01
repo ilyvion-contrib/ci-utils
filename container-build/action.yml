@@ -86,6 +86,8 @@ runs:
           if: ${{ inputs.builder == '' && inputs.s3_cache_bucket == '' }}
           uses: docker/build-push-action@v6
           with:
+              build-args: |
+                  CACHE_BUST=${{ github.run_id }}
               context: ${{ inputs.context }}
               cache-from: type=gha
               cache-to: type=gha,mode=max,compression=zstd,compression-level=3
@@ -96,6 +98,8 @@ runs:
           if: ${{ inputs.builder == '' && inputs.s3_cache_bucket != '' }}
           uses: docker/build-push-action@v6
           with:
+              build-args: |
+                  CACHE_BUST=${{ github.run_id }}
               context: ${{ inputs.context }}
               cache-from: type=s3,region=${{ inputs.s3_cache_region }},bucket=${{ inputs.s3_cache_bucket }}${{ inputs.s3_cache_prefix != '' && format(',blobs_prefix={0}/blobs/,manifests_prefix={0}/manifests/', inputs.s3_cache_prefix) || '' }}
               cache-to: type=s3,mode=max,region=${{ inputs.s3_cache_region }},bucket=${{ inputs.s3_cache_bucket }}${{ inputs.s3_cache_prefix != '' && format(',blobs_prefix={0}/blobs/,manifests_prefix={0}/manifests/', inputs.s3_cache_prefix) || '' }}
@@ -106,6 +110,8 @@ runs:
           if: ${{ inputs.builder != '' }}
           uses: docker/build-push-action@v6
           with:
+              build-args: |
+                  CACHE_BUST=${{ github.run_id }}
               context: ${{ inputs.context }}
               builder: ${{ inputs.builder }}
               tags: ${{ inputs.image }}:${{ inputs.tag }}
