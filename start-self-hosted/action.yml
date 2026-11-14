@@ -81,7 +81,7 @@ runs:
         - name: Start EC2 runner (spot)
           id: start-runner-spot
           continue-on-error: true
-          uses: machulav/ec2-github-runner@v2.6.1
+          uses: machulav/ec2-github-runner@343a1b2ae682e681c3cec9a235d882da17ff04ef # v2.6.1
           with:
               mode: start
               market-type: spot
@@ -97,7 +97,7 @@ runs:
         - name: Start EC2 runner (on-demand fallback)
           id: start-runner-ondemand
           if: steps.start-runner-spot.outcome == 'failure'
-          uses: machulav/ec2-github-runner@v2.6.1
+          uses: machulav/ec2-github-runner@343a1b2ae682e681c3cec9a235d882da17ff04ef # v2.6.1
           with:
               mode: start
               github-token: ${{ inputs.github_personal_access_token }}

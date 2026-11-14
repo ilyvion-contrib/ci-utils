@@ -25,9 +25,11 @@ runs:
     steps:
         - name: Set up SSH access
           shell: bash
+          env:
+              SSH_PRIVATE_KEY: ${{ inputs.ssh_private_key }}
           run: |
               mkdir -p -m 700 ~/.ssh
 
               echo "[${{ inputs.ssh_host }}]:${{ inputs.ssh_port }} ${{ inputs.ssh_known_hosts }}" > ~/.ssh/known_hosts
-              echo "${{ inputs.ssh_private_key }}" > ~/.ssh/${{ inputs.ssh_id_file }}
+              printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/${{ inputs.ssh_id_file }}
               chmod 600 ~/.ssh/${{ inputs.ssh_id_file }}
