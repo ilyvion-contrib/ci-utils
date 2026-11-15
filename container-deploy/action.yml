@@ -20,6 +20,10 @@ inputs:
         default: staging
         required: false
 
+# The server's deploy key runs a forced command, /usr/local/bin/ci-deploy, that
+# allows only these exact rsync and ssh commands per app and tag. Changing
+# either command, deploying another tag or adding an app needs a matching
+# change to that wrapper, or the deploy fails with "ci-deploy: command not allowed".
 runs:
     using: "composite"
     steps:
