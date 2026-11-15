@@ -23,7 +23,7 @@ inputs:
         description: The IAM role name for the EC2 instance (optional, requires additional permissions)
         required: false
     aws_resource_tags:
-        description: The AWS resource tags for the EC2 instance (optional, requires additional permissions)
+        description: Extra AWS resource tags for the EC2 instance and its volumes, as a JSON array of {"Key","Value"} objects (optional). The instance and its volumes are always tagged github-runner=true, which the runner IAM policy requires.
         default: "[]"
         required: false
     pre-runner-script:
@@ -78,6 +78,14 @@ runs:
               role-to-assume: ${{ inputs.aws_role }}
               aws-region: ${{ inputs.aws_region }}
 
+        - name: Add runner tag
+          id: tags
+          shell: bash
+          env:
+              AWS_RESOURCE_TAGS: ${{ inputs.aws_resource_tags }}
+          run: |
+              echo "tags=$(jq -c '. + [{"Key":"github-runner","Value":"true"}]' <<<"$AWS_RESOURCE_TAGS")" >> "$GITHUB_OUTPUT"
+
         - name: Start EC2 runner (spot)
           id: start-runner-spot
           continue-on-error: true
@@ -88,7 +96,7 @@ runs:
               github-token: ${{ inputs.github_personal_access_token }}
               ec2-instance-type: ${{ inputs.ec2_instance_type }}
               iam-role-name: ${{ inputs.iam_role_name }} # optional, requires additional permissions
-              aws-resource-tags: ${{ inputs.aws_resource_tags }} # optional, requires additional permissions
+              aws-resource-tags: ${{ steps.tags.outputs.tags }}
               pre-runner-script: ${{ inputs.pre-runner-script }}
               ec2-volume-size: ${{ inputs.custom-disk-size }}
               ec2-device-name: ${{ inputs.custom-disk-name }}
@@ -103,7 +111,7 @@ runs:
               github-token: ${{ inputs.github_personal_access_token }}
               ec2-instance-type: ${{ inputs.ec2_instance_type }}
               iam-role-name: ${{ inputs.iam_role_name }} # optional, requires additional permissions
-              aws-resource-tags: ${{ inputs.aws_resource_tags }} # optional, requires additional permissions
+              aws-resource-tags: ${{ steps.tags.outputs.tags }}
               pre-runner-script: ${{ inputs.pre-runner-script }}
               ec2-volume-size: ${{ inputs.custom-disk-size }}
               ec2-device-name: ${{ inputs.custom-disk-name }}
