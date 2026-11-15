@@ -9,7 +9,7 @@ inputs:
         description: The AWS region
         required: true
     github_personal_access_token:
-        description: GitHub Personal Access Token with the repo scope assigned
+        description: Fine-grained GitHub Personal Access Token with Administration read and write access to the repository
         required: true
     ec2_image_id:
         description: The EC2 image ID
