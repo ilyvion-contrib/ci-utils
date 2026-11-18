@@ -41,7 +41,7 @@ inputs:
             sudo mkswap /swapfile
             sudo swapon /swapfile
             sudo mkdir -p /disktmp
-            sudo chown 777 /disktmp
+            sudo chmod 1777 /disktmp
             sudo mount --bind /disktmp /tmp
     custom-disk-size:
         description: The custom disk size for the EC2 instance (optional)
@@ -86,8 +86,10 @@ runs:
           run: |
               echo "tags=$(jq -c '. + [{"Key":"github-runner","Value":"true"}]' <<<"$AWS_RESOURCE_TAGS")" >> "$GITHUB_OUTPUT"
 
+        # Re-run attempts use on-demand capacity so a reclaimed spot instance cannot fail the retry.
         - name: Start EC2 runner (spot)
           id: start-runner-spot
+          if: ${{ github.run_attempt == '1' }}
           continue-on-error: true
           uses: machulav/ec2-github-runner@343a1b2ae682e681c3cec9a235d882da17ff04ef # v2.6.1
           with:
@@ -104,7 +106,7 @@ runs:
 
         - name: Start EC2 runner (on-demand fallback)
           id: start-runner-ondemand
-          if: steps.start-runner-spot.outcome == 'failure'
+          if: steps.start-runner-spot.outcome != 'success'
           uses: machulav/ec2-github-runner@343a1b2ae682e681c3cec9a235d882da17ff04ef # v2.6.1
           with:
               mode: start

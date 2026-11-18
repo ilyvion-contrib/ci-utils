@@ -31,6 +31,12 @@ runs:
               role-to-assume: ${{ inputs.aws_role }}
               aws-region: ${{ inputs.aws_region }}
 
+        - name: Report spot interruption
+          shell: bash
+          env:
+              INSTANCE_ID: ${{ inputs.ec2_instance_id }}
+          run: bash "$GITHUB_ACTION_PATH/report-spot-interruption.sh"
+
         - name: Unmount cache volume
           if: ${{ inputs.cache_volume_id != '' }}
           shell: bash

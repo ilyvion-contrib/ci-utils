@@ -59,6 +59,11 @@ runs:
               echo "::error::Input 'disable_cache' cannot be combined with 'builder' or 's3_cache_bucket'."
               exit 1
 
+        - name: Start spot interruption watcher
+          if: ${{ runner.environment == 'self-hosted' }}
+          shell: bash
+          run: nohup bash "$GITHUB_ACTION_PATH/spot-interruption-watcher.sh" "$RUNNER_TEMP/spot-interruption-notice" > /dev/null 2>&1 < /dev/null &
+
         - name: Set up Docker Buildx (no persistent builder)
           if: ${{ inputs.builder == '' }}
           uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
@@ -170,3 +175,12 @@ runs:
         - name: Save Docker image
           shell: bash
           run: docker save -o ${{ inputs.image }}.tar ${{ inputs.image }}:${{ inputs.tag }}
+
+        # retry-spot-interruption matches the annotation title.
+        - name: Report spot interruption
+          if: ${{ failure() && runner.environment == 'self-hosted' }}
+          shell: bash
+          run: |
+              if [ -f "$RUNNER_TEMP/spot-interruption-notice" ]; then
+                echo "::error title=Spot instance reclaimed::AWS is reclaiming this spot instance, so the build was stopped."
+              fi

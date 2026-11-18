@@ -1,0 +1,23 @@
+name: Retry spot interruption
+description: "Re-runs a failed workflow run whose self-hosted spot runner was reclaimed by AWS. Use from a workflow triggered by `workflow_run` with the `actions: write` and `checks: read` permissions."
+
+inputs:
+    github_token:
+        description: Token used to inspect and re-run the workflow run
+        default: ${{ github.token }}
+        required: false
+
+runs:
+    using: "composite"
+    steps:
+        - name: Re-run workflow if its spot runner was reclaimed
+          shell: bash
+          env:
+              GH_TOKEN: ${{ inputs.github_token }}
+              REPOSITORY: ${{ github.repository }}
+              RUN_ID: ${{ github.event.workflow_run.id }}
+              RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+              RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+              WORKFLOW_ID: ${{ github.event.workflow_run.workflow_id }}
+              HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          run: bash "$GITHUB_ACTION_PATH/retry.sh"
